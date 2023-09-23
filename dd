@@ -1,0 +1,657 @@
+/*
+ * Copyright (c) 2015-2020, Texas Instruments Incorporated
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ *
+ * *  Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ *
+ * *  Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * *  Neither the name of Texas Instruments Incorporated nor the names of
+ *    its contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
+ * THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR
+ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+ * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+ * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+ * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+ * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+ * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
+ * EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+
+/*
+ *  ======== uartecho.c ========
+ */
+#include <stdint.h>
+#include <stddef.h>
+#include "header.h"
+#include <stdbool.h>
+
+/* Driver Header files */
+#include <ti/drivers/GPIO.h>
+#include <ti/drivers/UART.h>
+
+/* Driver configuration */
+#include "ti_drivers_config.h"
+
+/*
+ *  ======== mainThread ========
+ */
+char errordisplay[];
+char nextword[];
+char nextnextword[];
+char xmitbuff[];
+const char helpgpiomessage[] =  
+        "\r\n This function allows you to toggle, read and write the four LED lights on the launchpad.\r\nHowever the indexes of the led starts at zero and end at 3. You can also read from the sw1 and sw2 switches\r\nTo read, toggle or write, first type -gpio then the gpio pin you want to read and then type the respective function denoted by 'r', 'w' or 't'.\r\nTo write you further need to type a 1 or 0.\r\n";
+const char invalidmemr[] =
+        "To use the -memr function you have to type a message after the -memr function\r\n";
+char command[MSGLENGTH];
+const char invalidcommand[] =
+        "\r\nCommand not supported. Please use -help to see the supported commands\r\n";
+const char howtouseprintmessage[] =
+        "\r\nTo use the -print command you have to type -print and a single space bar then you type your message\r\n";
+const char helpmessage[] =
+        "\r\n supported commands\r\n -help\r\n -about\r\n -memr\r\n-print\r\n -gpio\r\n-error\r\n";
+const char helphelpmessage[] =
+        "\r\n This gives you the various commands the MSP432 has\r\n";
+const char helpaboutmessage[] =
+        "\r\n This basically tells you what the author of the code is.It also gives you information about the version number and the time of compilation\r\n ";
+const char helpprintmessage[] =
+        "\r\n This basically prints a message. You can use this function to print stuff. \r\n";
+const char helpmemrmessage[] =
+        "\r\n This is a function that allows you to read from memory location \r\n.The following are the memory ranges:\r\n0x0000000 to 0x000FFFFF: Flash\r\n0x20000000 to 0x2003FFF: SRAM \r\n0x40000000 to 0x44054FFF: Peripherals\r\nThe -memr function helps you to read the memory location but remember addresses and data are all in hex and beware of reading invalid memory addresses as it can cause a fatal error\r\n";
+const char invalidhelp[] = "\r\n I cannot help with that \r\n";
+const char helperrormessage[] = "\r\nThis displays an error message from all the error types\r\n";
+bool compareFirstWord(const char *command, const char *target)
+{
+    // Skip leading whitespace
+    while (*command && isspace(*command))
+        command++;
+
+    // Find the end of the first word
+    const char *endOfFirstWord = command;
+    while (*endOfFirstWord && !isspace(*endOfFirstWord))
+        endOfFirstWord++;
+
+    // find the length of the first word
+    size_t firstWordLength = endOfFirstWord - command;
+
+    // Comparison of the first word to the target
+    return (strncmp(command, target, firstWordLength) == 0
+            && target[firstWordLength] == '\0');
+}
+// ... (previous code)
+
+
+
+
+void memrFunction(UART_Handle uart, const char *command)
+{
+    UART_write(uart, "\r\n", strlen("\r\n"));
+    command += strlen("-memr");
+    int32_t value;
+    uint32_t memory_address;
+    char *ptr;
+
+    // Skip leading whitespace
+    while (*command && isspace(*command))
+        command++;
+
+    // Check if there is a second word
+    if (*command)
+    {
+        memory_address = 0;
+        memory_address = 0xFFFFFFF0 & strtol(command, &ptr, 16);
+
+        if (memory_address >= 0x00100000 && memory_address < 0x20000000)
+        {
+            UART_write(uart, "memory out of range",
+                       strlen("memory out of range"));
+            UART_write(uart, "\r\n", strlen("\r\n"));
+            MemError++ ;
+        }
+        else if (memory_address >= 0x20040000 && memory_address < 0x40000000)
+        {
+            UART_write(uart, "memory out of range",
+                       strlen("memory out of range"));
+            UART_write(uart, "\r\n", strlen("\r\n"));
+            MemError++ ;
+        }
+        else if (memory_address >= 0x20040000 && memory_address < 0x40000000)
+        {
+            UART_write(uart, "memory out of range",
+                       strlen("memory out of range"));
+            UART_write(uart, "\r\n", strlen("\r\n"));
+            MemError++;
+        }
+        else if (memory_address >= 0x44055000)
+        {
+            UART_write(uart, "memory out of range",
+                       strlen("memory out of range"));
+            UART_write(uart, "\r\n", strlen("\r\n"));
+            MemError++;
+        }
+        else
+        {
+            char printer[50];
+            sprintf(printer, "%#010x %#010x %#010x %#010x \r\n",
+                    memory_address + 0xC, memory_address + 0x8,
+                    memory_address + 0x4, memory_address + 0x0);
+            UART_write(uart, printer, strlen(printer));
+
+            value = *(int32_t*) (memory_address + 0xC);
+            sprintf(printer, "%#010x ", value);
+            UART_write(uart, printer, strlen(printer));
+            value = *(int32_t*) (memory_address + 0x8);
+            sprintf(printer, "%#010x ", value);
+            UART_write(uart, printer, strlen(printer));
+            value = *(int32_t*) (memory_address + 0x4);
+            sprintf(printer, "%#010x ", value);
+            UART_write(uart, printer, strlen(printer));
+            value = *(int32_t*) (memory_address + 0x0);
+            sprintf(printer, "%#010x ", value);
+            UART_write(uart, printer, strlen(printer));
+
+            UART_write(uart, "\r\n", strlen("\r\n"));
+            UART_write(uart, "\r\n", strlen("\r\n"));
+        }
+    }
+    else
+    {
+        UART_write(uart, invalidmemr, sizeof(invalidmemr));
+        MessageUnknown++ ;
+    }
+
+}
+
+void Aboutfunction(UART_Handle uart)
+{
+    const char aboutmessage[] =
+            "\r\nKwame Afrifa Obeng-Ofori\r\nAssignment:01r\r\nVersion: Version1.0\r\nDate/Time: " __DATE__ " " __TIME__ "\r\n";
+    UART_write(uart, aboutmessage, sizeof(aboutmessage));
+}
+void printFunction(UART_Handle uart, const char *command)
+{
+    command += strlen("-print ");
+
+    // Check if there are characters to print
+    if (*command)
+    {
+        // Print a newline before printing the characters
+        UART_write(uart, "\r\n", strlen("\r\n"));
+        // Print the characters to the UART
+        UART_write(uart, command, strlen(command));
+        UART_write(uart, "\r\n", strlen("\r\n")); // Print another newline to move to the next line
+
+    }
+    else
+    {
+        // Handle the case where there are no characters to print
+        UART_write(uart, "\r\nYou have entered nothing to print.\r\n",
+                   strlen("\r\nYou have entered nothing to print.\r\n"));
+        MessageUnknown++;
+    }
+}
+void helpFunction(UART_Handle uart, const char *command)
+{
+
+    command += strlen("-help");
+
+    // Skip leading whitespace
+    while (*command && isspace(*command))
+        command++;
+
+    // Check if there is a second word
+    if (*command)
+    {
+        if (compareFirstWord(command, "about"))
+        {
+            UART_write(uart, helpaboutmessage, sizeof(helpaboutmessage));
+        }
+        else if (compareFirstWord(command, "print"))
+        {
+            UART_write(uart, helpprintmessage, sizeof(helpprintmessage));
+        }
+        else if (compareFirstWord(command, "help"))
+        {
+            UART_write(uart, helphelpmessage, sizeof(helphelpmessage));
+        }
+        else if (compareFirstWord(command, "memr"))
+        {
+            UART_write(uart, helpmemrmessage, sizeof(helpmemrmessage));
+        }
+        else if (compareFirstWord(command, "gpio"))
+        {UART_write(uart, helpgpiomessage, sizeof(helpgpiomessage));
+
+        }
+        else if(compareFirstWord(command, "error"))
+        {
+            UART_write(uart, helperrormessage, sizeof(helperrormessage));
+        }
+        else
+        {
+            // Handle the case where the second word is not any of the known functions
+            UART_write(uart, invalidhelp, sizeof(invalidhelp));
+            MessageUnknown++ ;
+        }
+    }
+    else
+    {
+        // Handle the case where there is no second word
+        UART_write(uart, helpmessage, sizeof(helpmessage));
+    }
+}
+
+void gpioFunction(UART_Handle uart, const char *command)
+{
+    UART_write(uart, command, sizeof(command));
+    char xmitbuf[MSGLENGTH];
+    command += strlen("-gpio");
+
+    int index;
+
+    // Skip leading whitespace
+    while (*command && isspace(*command))
+    {
+        command++;
+    }
+
+    if (!*command)
+    {
+        UART_write(uart, "\r\n", strlen("\r\n"));
+        int i;
+        for (i = 0; i < GPIOCOUNT; i++)
+        {
+            int input = GPIO_read(i);
+            sprintf(xmitbuf, "GPIO %d %d\r\n", i, input);
+            UART_write(uart, xmitbuf, strlen(xmitbuf));
+        }
+    }
+    else if (*command != '-' && isdigit(*command) == 0)
+    {
+        UART_write(uart, "\r\n", strlen("\r\n"));
+        UART_write(
+                uart,
+                "Error: Message missing a digits or order is not right. Please check -help gpio to understand how to use this function\r\n",
+                strlen("Error: Message missing a digits or order is not right. Please check -help gpio to understand how to use this function\r\n"));
+        parsingerror++;
+    }
+    else
+    {
+        int value;
+        char operation = 'r';  // Default to read
+
+        // Parse the index
+        if (sscanf(command, "%d", &index) == 1)
+        {
+            // Successfully parsed an integer as the index
+            // Advance the command pointer to the next space or the end of the string
+            while (*command && !isspace(*command))
+            {
+                command++;
+            }
+            // Skip any additional spaces
+            while (*command && isspace(*command))
+            {
+                command++;
+            }
+            if (!*command && (index > 0 && index < GPIOCOUNT))
+            {
+                UART_write(uart, "\r\n", strlen("\r\n"));
+                int input = GPIO_read(index);
+                sprintf(xmitbuf, "GPIO %d %d\r\n", index, input);
+                UART_write(uart, xmitbuf, strlen(xmitbuf));
+
+            }
+
+            else if (!*command && (index < 0 || index >= GPIOCOUNT))
+            {
+                UART_write(uart, "\r\n", strlen("\r\n"));
+                int i;
+                for (i = 0; i < GPIOCOUNT; i++)
+                {
+                    int input = GPIO_read(i);
+
+                    sprintf(xmitbuf, "GPIO %d %d\r\n", i, input);
+                    UART_write(uart, xmitbuf, strlen(xmitbuf));
+                }
+            }
+            else if (*command)
+            {
+                // Parse the operation
+                operation = *command;
+
+                // Check if it's a valid operation (r, w, or t)
+                if (strchr("rwt", operation))
+                {
+                    command++; // Advance to the next character after the operation
+                }
+                else
+                {
+                    // Handle invalid operation
+                    UART_write(uart, "\r\n", strlen("\r\n"));
+                    UART_write(uart, "Error: Invalid GPIO operation.\r\n",
+                               strlen("Error: Invalid GPIO operation.\r\n"));
+                    parsingerror++;
+                    return;
+                }
+
+                // Check if there's a third string (the value)
+
+                // Check if the index is within the valid range
+                switch (operation)
+                {
+
+                case 'r':
+                    if (*command)
+                    {
+                        // Display error if there is a third string
+                        UART_write(uart, "\r\n", strlen("\r\n"));
+                        UART_write(
+                                uart, "Error: Invalid GPIO operation.\r\n",
+                                strlen("Error: Invalid GPIO operation.\r\n"));
+                        parsingerror++;
+                    }
+                    else if (index < 0 || index >= GPIOCOUNT)
+                    {
+                        UART_write(uart, "\r\n", strlen("\r\n"));
+                        int i;
+                        for (i = 0; i < GPIOCOUNT; i++)
+                        {
+                            int input = GPIO_read(i);
+
+                            sprintf(xmitbuf, "GPIO %d %d\r\n", i, input);
+                            UART_write(uart, xmitbuf, strlen(xmitbuf));
+                        }
+                    }
+                    else
+                    {
+                        int input = GPIO_read(index);
+                        // Send a response with the read value on a new line
+                        sprintf(xmitbuf, "GPIO %d %d\r\n", index, input);
+                        UART_write(uart, "\r\n", strlen("\r\n"));
+                        UART_write(uart, xmitbuf, strlen(xmitbuf));
+                    }
+                    break;
+
+                case 't':
+
+                    if (*command)
+                    {
+                        UART_write(uart, "\r\n", strlen("\r\n"));
+                        UART_write(
+                                uart, "Error: Invalid GPIO operation.\r\n",
+                                strlen("Error: Invalid GPIO operation.\r\n"));
+                        parsingerror++;
+                    }
+                    else if (index < 0 || index >= GPIOCOUNT)
+                    {
+                        // Check if the index is out of range for the toggle operation
+
+                        UART_write(uart, "\r\n", strlen("\r\n"));
+                        UART_write(
+                                uart, "Error: Invalid index to toggle.\r\n",
+                                strlen("Error: Invalid index to toggle.\r\n"));
+                        parsingerror++;
+                    }
+                    else
+                    {
+                        // Perform the toggle operation with the specified index
+                        GPIO_toggle(index);
+                        UART_write(uart, "\r\n", strlen("\r\n"));
+                    }
+                    break;
+
+                case 'w':
+                    if (*command)
+                    {
+                        // Parse the value
+                        if (sscanf(command, "%d", &value) != 1
+                                || (value != 0 && value != 1))
+                        {
+                            // Handle invalid value
+                            UART_write(uart, "\r\n", strlen("\r\n"));
+                            UART_write(
+                                    uart,
+                                    "Error: Invalid value to write. Must be 1 or 0.\r\n",
+                                    strlen("Error: Invalid value to write. Must be 1 or 0.\r\n"));
+                            parsingerror++;
+                        }
+                        else
+                        {
+                            if (index < 0 || index >= GPIOCOUNT)
+                            {
+                                UART_write(uart, "\r\n", strlen("\r\n"));
+                                UART_write(
+                                        uart,
+                                        "Error: Invalid gpio pin to write to. Check -gpio help to see the valid indexes.\r\n",
+                                        strlen("Error: Invalid gpio pin to write to. Check -gpio help to see the valid indexes.\r\n"));
+                                parsingerror++;
+                            }
+                            else
+                            {
+                                // Perform the write operation with the specified index and value
+                                UART_write(uart, "\r\n", strlen("\r\n"));
+                                GPIO_write(index, value);
+                                // Send a response to confirm the write
+                                sprintf(xmitbuf, "GPIO %d %d\r\n", index,
+                                        value);
+                                UART_write(uart, xmitbuf, strlen(xmitbuf));
+                            }
+                        }
+                    }
+                    else
+                    {
+                        UART_write(uart, "\r\n", strlen("\r\n"));
+                        UART_write(
+                                uart, "Error: Invalid GPIO operation.\r\n",
+                                strlen("Error: Invalid GPIO operation.\r\n"));
+                        parsingerror++;
+                    }
+                    break;
+                }
+            }
+        }
+    }
+}
+
+void errordisplaymessage(UART_Handle uart, const char *command){
+    command += strlen("-error");
+    while (*command && isspace(*command))
+          command++;
+
+    if(!*command)
+    {
+    sprintf(errordisplay, "\r\nError Type 1 Buffer Overflow %d\r\n", Buffertypeerror);
+    UART_write(uart, errordisplay , strlen(errordisplay));
+    sprintf(errordisplay, "Error Type 2 Unnkown Message %d\r\n", MessageUnknown);
+    UART_write(uart, errordisplay , strlen(errordisplay));
+    sprintf(errordisplay, "Error Type 3 Parsing error missing required digits %d\r\n", parsingerror);
+    UART_write(uart, errordisplay , strlen(errordisplay));
+
+    sprintf(errordisplay, "Error Type 4 Reading from invalid memory address %d\r\n", MemError);
+              UART_write(uart, errordisplay , strlen(errordisplay));
+    }
+    else if (compareFirstWord(command, "1"))
+    {
+        sprintf(errordisplay, "\r\n Error Type 1 Buffer Overflow %d\r\n", Buffertypeerror);
+    UART_write(uart, errordisplay , strlen(errordisplay));
+
+    }
+    else if(compareFirstWord(command, "2"))
+    {
+        sprintf(errordisplay, "\r\nError Type 2 Unnkown Message %d\r\n", MessageUnknown);
+        UART_write(uart, errordisplay , strlen(errordisplay));
+    }
+    else if(compareFirstWord(command, "3"))
+    {
+        sprintf(errordisplay, "\r\nError Type 3 Parsing error missing required digits %d\r\n", parsingerror);
+               UART_write(uart, errordisplay , strlen(errordisplay));
+    }
+    else if(compareFirstWord(command, "4"))
+    {
+        sprintf(errordisplay, "Error Type 4 Reading from invalid memory address %d\r\n", MemError);
+         UART_write(uart, errordisplay , strlen(errordisplay));
+
+    }
+    else
+    {
+        sprintf(errordisplay, "\r\n Error Type 1 Buffer Overflow %d\r\n", Buffertypeerror);
+           UART_write(uart, errordisplay , strlen(errordisplay));
+           sprintf(errordisplay, "Error Type 2 Unnkown Message %d\r\n", MessageUnknown);
+           UART_write(uart, errordisplay , strlen(errordisplay));
+           sprintf(errordisplay, "Error Type 3 Parsing error missing required digits %d\r\n", parsingerror);
+              UART_write(uart, errordisplay , strlen(errordisplay));
+
+             sprintf(errordisplay, "Error Type 4 Reading from invalid memory address %d\r\n", MemError);
+                     UART_write(uart, errordisplay , strlen(errordisplay));
+    }
+
+
+
+}
+void processCommand(UART_Handle uart, const char *command)
+{
+    if (compareFirstWord(command, "-help"))
+    {
+        helpFunction(uart, command);
+    }
+    else if (strcmp(command, "-about") == 0)
+    {
+        Aboutfunction(uart);
+    }
+    else if (strncmp(command, "-print ", 7) == 0)
+    {
+        printFunction(uart, command);
+    }
+    else if (strcmp(command, "-print") == 0)
+    {
+        UART_write(uart, howtouseprintmessage, sizeof(howtouseprintmessage));
+        MessageUnknown++ ;
+    }
+    else if (compareFirstWord(command, "-memr"))
+    {
+        memrFunction(uart, command);
+    }
+    else if (compareFirstWord(command, "-gpio"))
+    {
+        gpioFunction(uart, command);
+    }
+    else if(compareFirstWord(command, "-error")){
+        errordisplaymessage(uart, command);
+    }
+    else
+    {
+        UART_write(uart, invalidcommand, sizeof(invalidcommand));
+        MessageUnknown++;
+    }
+}
+void* mainThread(void *arg0)
+{
+    char input;
+
+    // Buffer to store user command
+    int commandIndex = 0;
+    const char echoPrompt[] =
+            "Welcome to the MSP432, What will you like to do?\r\n";
+
+    UART_Handle uart;
+    UART_Params uartParams;
+
+    /* Call driver init functions */
+    GPIO_init();
+    UART_init();
+
+    /* Configure the LED pin */
+    GPIO_setConfig(CONFIG_GPIO_0, GPIO_CFG_OUT_STD | GPIO_CFG_OUT_LOW);
+    GPIO_setConfig(CONFIG_GPIO_1, GPIO_CFG_OUT_STD | GPIO_CFG_OUT_LOW);
+    GPIO_setConfig(CONFIG_GPIO_2, GPIO_CFG_OUT_STD | GPIO_CFG_OUT_LOW);
+    GPIO_setConfig(CONFIG_GPIO_3, GPIO_CFG_OUT_STD | GPIO_CFG_OUT_LOW);
+    GPIO_setConfig(CONFIG_GPIO_4, GPIO_CFG_OUT_STD | GPIO_CFG_OUT_LOW);
+    GPIO_setConfig(CONFIG_GPIO_5, GPIO_CFG_OUT_STD | GPIO_CFG_OUT_LOW);
+    GPIO_setConfig(CONFIG_GPIO_6, GPIO_CFG_IN_PU | GPIO_CFG_OUT_LOW);
+    GPIO_setConfig(CONFIG_GPIO_7, GPIO_CFG_IN_PU | GPIO_CFG_OUT_LOW);
+
+    /* Turn on user LED */
+    GPIO_write(CONFIG_GPIO_0, CONFIG_GPIO_LED_ON);
+    GPIO_write(CONFIG_GPIO_1, CONFIG_GPIO_LED_ON);
+    GPIO_write(CONFIG_GPIO_2, CONFIG_GPIO_LED_ON);
+    GPIO_write(CONFIG_GPIO_3, CONFIG_GPIO_LED_ON);
+    GPIO_write(CONFIG_GPIO_4, 0);
+    GPIO_write(CONFIG_GPIO_5, 0);
+
+    /* Create a UART with data processing off. */
+    UART_Params_init(&uartParams);
+    uartParams.writeDataMode = UART_DATA_BINARY;
+    uartParams.readDataMode = UART_DATA_BINARY;
+    uartParams.readReturnMode = UART_RETURN_FULL;
+    uartParams.baudRate = 115200;
+
+    uart = UART_open(CONFIG_UART_0, &uartParams);
+
+    if (uart == NULL)
+    {
+        /* UART_open() failed */
+        while (1)
+            ;
+    }
+
+    UART_write(uart, echoPrompt, sizeof(echoPrompt));
+
+    /* Loop forever echoing */
+    while (1)
+    {
+        UART_read(uart, &input, 1);
+        UART_write(uart, &input, 1);
+        if (input == '\r' || input == '\n')
+        {
+            command[commandIndex] = '\0';  // Null-terminate the command string
+            processCommand(uart, command);  // Process the command
+            commandIndex = 0;  // Reset the command buffer index
+        }
+        else if (input == '\b' || input == 0x7f)
+        {
+            if (commandIndex > 0)
+            {
+                commandIndex--;
+                if (commandIndex == 0)
+                {
+                    command[commandIndex] = '\0';
+                }
+            }
+
+            UART_write(uart, " \b", strlen(" \b"));
+        }
+        else
+        {
+            if (commandIndex < sizeof(command) - 1)
+            {
+
+                command[commandIndex] = input;
+                commandIndex++;  // Increment the command buffer index
+
+            }
+            else
+            {
+                // Buffer overflow occurred, display an error message
+                const char overflowMessage[] =
+                        "\r\nBuffer overflow. Input too long.\r\n";
+                Buffertypeerror++ ;
+                UART_write(uart, overflowMessage, sizeof(overflowMessage) - 1);
+                commandIndex = 0; // Reset the command buffer index after error message
+            }
+        }
+    }
+}
+
